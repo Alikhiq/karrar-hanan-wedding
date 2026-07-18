@@ -526,6 +526,16 @@ main{position:relative;z-index:1}
     try{ sessionStorage.setItem('khGuestPin', pin); }catch(e){}
     return true;
   }
+  // expose for the curtain intro + read a personalized ?p= / ?pin= link
+  window.__khReveal = reveal;
+  function paramPin(){
+    try{
+      var m = (location.search||'').match(/[?&](?:p|pin)=(\d{3,6})/);
+      var p = m ? m[1] : null;
+      return (p && GUESTS[p]) ? p : null;
+    }catch(e){ return null; }
+  }
+  window.__khParamPin = paramPin;
   function init(){
     var stored = null;
     try{ stored = sessionStorage.getItem('khGuestPin'); }catch(e){}
@@ -534,6 +544,9 @@ main{position:relative;z-index:1}
     var input = document.getElementById('pinInput');
     var err = document.getElementById('pinError');
     if (!form) return;
+    // personalized link: prefill the PIN so the guest never types (auto-entry happens after the intro)
+    var pp = paramPin();
+    if (pp && input) input.value = pp;
     form.addEventListener('submit', function(e){
       e.preventDefault();
       var pin = (input.value || '').trim();
@@ -970,7 +983,11 @@ main{position:relative;z-index:1}
   var playing = false, armed = false;
 
   function armPin(){
-    if (armed || window.__khEntered) return; armed = true;
+    if (armed || window.__khEntered) return;
+    // personalized link → skip the keypad, reveal their name directly
+    var pp = window.__khParamPin && window.__khParamPin();
+    if (pp && window.__khReveal){ armed = true; setTimeout(function(){ window.__khReveal(pp); }, 250); return; }
+    armed = true;
     var gate = document.getElementById('pinGate');
     if (gate) gate.classList.add('armed');
     var input = document.getElementById('pinInput');
