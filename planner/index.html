@@ -118,6 +118,17 @@
   .note-in,.phone-in{width:100%;min-width:90px;font-family:var(--serif);font-size:1rem;color:var(--ink);
     border:none;border-bottom:1px dashed var(--line);background:none;padding:.24rem .1rem;outline:none}
   .note-in:focus,.phone-in:focus{border-bottom-color:var(--gold);border-bottom-style:solid}
+  .badge-new{display:inline-block;margin-left:.5rem;font-size:.58rem;letter-spacing:.12em;text-transform:uppercase;
+    color:var(--gold-deep);background:var(--pend-bg);border:1px solid #E0D0A0;border-radius:2px;padding:.14rem .4rem;vertical-align:middle}
+  .addguest{display:none;flex-wrap:wrap;gap:.55rem;align-items:flex-end;background:var(--card);
+    border:1px solid var(--line-soft);border-radius:5px;padding:.9rem 1rem;margin-top:.8rem;box-shadow:var(--shadow)}
+  .addguest.open{display:flex}
+  .addguest .field{display:flex;flex-direction:column;gap:.25rem}
+  .addguest label{font-size:.6rem;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3)}
+  .addguest input{font-family:var(--serif);font-size:1.05rem;padding:.4rem .6rem;border:1px solid var(--line-soft);
+    border-radius:3px;background:var(--paper);outline:none;color:var(--ink)}
+  .addguest input:focus{border-color:var(--gold)}
+  .addguest .ar-in{font-family:var(--ar);direction:rtl}
   .row-actions{display:flex;gap:.3rem;white-space:nowrap}
   .ic{border:1px solid var(--line);background:var(--card);border-radius:3px;width:30px;height:30px;
     display:inline-flex;align-items:center;justify-content:center;cursor:pointer;color:var(--ink-2);transition:.15s}
@@ -232,12 +243,24 @@
         <button data-f="confirmed">Confirmed</button>
         <button data-f="declined">Declined</button>
       </div>
+      <button class="btn" id="addGuestBtn">+ Add family</button>
       <button class="btn" id="copyAll" title="Copy every send-message as a list">Copy all messages</button>
       <button class="btn ghost" id="exportCsv">CSV</button>
       <button class="btn ghost" id="exportJson">Backup</button>
       <button class="btn ghost" id="importJson">Restore</button>
       <input type="file" id="fileIn" accept="application/json" hidden>
     </div>
+
+    <form class="addguest" id="addGuestForm">
+      <div class="field" style="flex:1 1 220px"><label for="agEn">Greeting — English</label>
+        <input id="agEn" placeholder="e.g. Omar &amp; His Wife Sara" required></div>
+      <div class="field" style="flex:1 1 200px"><label for="agAr">Greeting — Arabic</label>
+        <input id="agAr" class="ar-in" placeholder="مثال: عمر وزوجته سارة"></div>
+      <div class="field" style="width:5.5em"><label for="agParty">Invited</label>
+        <input id="agParty" type="number" min="1" value="1"></div>
+      <button class="btn" type="submit">Add · PIN auto</button>
+      <button class="btn ghost" type="button" id="copyNew" title="Copy the new families as code to send to Ali">Copy new guests for Ali</button>
+    </form>
 
     <section class="ledger">
       <table aria-label="Guest ledger">
@@ -360,12 +383,22 @@
   /* ===== state (persisted) ===== */
   var state = load();
   function load(){
-    try{ var s = JSON.parse(localStorage.getItem(STORE)); if(s && s.g) return s; }catch(e){}
+    try{ var s = JSON.parse(localStorage.getItem(STORE)); if(s && s.g){ if(!s.added) s.added=[]; return s; } }catch(e){}
     var g = {};
     FAMILIES.forEach(function(f){ g[f.pin] = {status:"pending", party:f.party, attending:"", phone:"", notes:""}; });
-    return {g:g, check:DEFAULT_CHECK.map(function(t){return {t:t,done:false};})};
+    return {g:g, added:[], check:DEFAULT_CHECK.map(function(t){return {t:t,done:false};})};
   }
   function save(){ try{ localStorage.setItem(STORE, JSON.stringify(state)); }catch(e){} }
+  function allFamilies(){
+    // hide an added family once the same PIN has been baked into the shipped roster
+    var extra=(state.added||[]).filter(function(a){ return !FAMILIES.some(function(f){return f.pin===a.pin;}); });
+    return FAMILIES.concat(extra);
+  }
+  function nextPin(){
+    var mx = 1000;
+    allFamilies().forEach(function(f){ var n=parseInt(f.pin,10); if(n>mx) mx=n; });
+    return String(mx+1);
+  }
 
   /* ===== helpers ===== */
   function $(s,r){return (r||document).querySelector(s);}
@@ -425,8 +458,20 @@
     a.addEventListener("click",function(){copy(linkFor(f.pin),"Link copied — "+f.en);});
     var b=el("button","ic"); b.title="Copy send-message"; b.innerHTML=IcMsg; b.setAttribute("aria-label","Copy message for "+f.en);
     b.addEventListener("click",function(){copy(msgFor(f),"Message copied — "+f.en);});
-    wrap.appendChild(a); wrap.appendChild(b); return wrap;
+    wrap.appendChild(a); wrap.appendChild(b);
+    if(f.isNew){
+      var d=el("button","ic"); d.title="Remove this added family"; d.setAttribute("aria-label","Remove "+f.en);
+      d.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+      d.addEventListener("click",function(){
+        if(!confirm("Remove "+f.en+" ("+f.pin+")?")) return;
+        state.added=state.added.filter(function(a2){return a2.pin!==f.pin;});
+        delete state.g[f.pin]; save(); paint(); toast("Removed "+f.en);
+      });
+      wrap.appendChild(d);
+    }
+    return wrap;
   }
+  function newBadge(){ var s=el("span","badge-new"); s.textContent="new · not on invite yet"; s.title="Works after Ali adds this PIN to the invitation site — use “Copy new guests for Ali”."; return s; }
 
   function paintTable(list){
     var tb=$("#rows"); tb.innerHTML="";
@@ -440,6 +485,7 @@
       // family
       var td2=el("td"); td2.className="fam";
       var en=el("div","fam-en"); en.innerHTML=famName(f);
+      if(f.isNew) en.appendChild(newBadge());
       var ar=el("div","fam-ar ar"); ar.textContent=f.ar+(f.nick?" — "+f.nick:"");
       td2.appendChild(en); td2.appendChild(ar); tr.appendChild(td2);
       // invited (party)
@@ -473,6 +519,7 @@
       var top=el("div","gcard-top");
       var left=el("div");
       var en=el("div","fam-en"); en.innerHTML=(i+1)+". "+famName(f);
+      if(f.isNew) en.appendChild(newBadge());
       var ar=el("div","fam-ar ar"); ar.textContent=f.ar+(f.nick?" — "+f.nick:"");
       left.appendChild(en); left.appendChild(ar);
       var pin=el("span","pin"); pin.textContent=f.pin;
@@ -504,8 +551,9 @@
   }
 
   function paintStats(){
-    var fam=FAMILIES.length, invited=0, conf=0, dec=0, pend=0, head=0;
-    FAMILIES.forEach(function(f){
+    var FAMS=allFamilies();
+    var fam=FAMS.length, invited=0, conf=0, dec=0, pend=0, head=0;
+    FAMS.forEach(function(f){
       var g=state.g[f.pin]; invited+=(+g.party||0);
       if(g.status==="confirmed"){conf++; head += g.attending===""? (+g.party||0) : (+g.attending||0);}
       else if(g.status==="declined") dec++;
@@ -528,7 +576,7 @@
   }
 
   function paint(){
-    var list=FAMILIES.filter(match);
+    var list=allFamilies().filter(match);
     paintTable(list); paintCards(list); paintStats();
   }
 
@@ -555,7 +603,7 @@
   }
   function csv(){
     var rows=[["#","PIN","Family (EN)","Family (AR)","Invited","RSVP","Attending","Phone","Notes","Link"]];
-    FAMILIES.forEach(function(f,i){var g=state.g[f.pin];
+    allFamilies().forEach(function(f,i){var g=state.g[f.pin];
       rows.push([i+1,f.pin,nameLine(f),f.ar+(f.nick?" ("+f.nick+")":""),g.party,g.status,g.attending,g.phone,g.notes,linkFor(f.pin)]);
     });
     return rows.map(function(r){return r.map(function(c){var s=String(c==null?"":c); return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;}).join(",");}).join("\r\n");
@@ -574,8 +622,9 @@
       });
     });
     $("#copyAll").addEventListener("click",function(){
-      var all=FAMILIES.map(function(f){return nameLine(f)+"  ["+f.pin+"]\n"+msgFor(f);}).join("\n\n———\n\n");
-      copy(all,"All "+FAMILIES.length+" messages copied");
+      var FAMS=allFamilies();
+      var all=FAMS.map(function(f){return nameLine(f)+"  ["+f.pin+"]\n"+msgFor(f);}).join("\n\n———\n\n");
+      copy(all,"All "+FAMS.length+" messages copied");
     });
     $("#exportCsv").addEventListener("click",function(){download("karrar-hanan-guests.csv","﻿"+csv(),"text/csv;charset=utf-8");toast("CSV downloaded");});
     $("#exportJson").addEventListener("click",function(){download("karrar-hanan-planner-backup.json",JSON.stringify(state,null,2),"application/json");toast("Backup downloaded");});
@@ -584,6 +633,30 @@
       var file=e.target.files[0]; if(!file) return; var r=new FileReader();
       r.onload=function(){ try{ var d=JSON.parse(r.result); if(d&&d.g){ state=d; if(!state.check) state.check=DEFAULT_CHECK.map(function(t){return{t:t,done:false};}); save(); paint(); paintCheck(); toast("Backup restored"); } else toast("Not a valid backup"); }catch(err){ toast("Could not read file"); } };
       r.readAsText(file); e.target.value="";
+    });
+    $("#addGuestBtn").addEventListener("click",function(){
+      var f=$("#addGuestForm"); f.classList.toggle("open");
+      if(f.classList.contains("open")) $("#agEn").focus();
+    });
+    $("#addGuestForm").addEventListener("submit",function(e){
+      e.preventDefault();
+      var en=$("#agEn").value.trim(); if(!en) return;
+      var ar=$("#agAr").value.trim() || en;
+      var party=Math.max(1,parseInt($("#agParty").value||"1",10));
+      var pin=nextPin();
+      state.added.push({pin:pin,en:en,ar:ar,party:party,isNew:true});
+      state.g[pin]={status:"pending",party:party,attending:"",phone:"",notes:""};
+      save(); paint();
+      $("#agEn").value=""; $("#agAr").value=""; $("#agParty").value="1";
+      toast("Added — PIN "+pin+" (send to Ali to activate)");
+    });
+    $("#copyNew").addEventListener("click",function(){
+      var fresh=(state.added||[]).filter(function(a){ return !FAMILIES.some(function(f){return f.pin===a.pin;}); });
+      if(!fresh.length){ toast("No new families to send"); return; }
+      var txt="New wedding guests to add to the invite:\n\n"+fresh.map(function(a){
+        return a.pin+" | "+a.en+" | "+a.ar+" | invited "+a.party;
+      }).join("\n");
+      copy(txt, fresh.length+" new famil"+(fresh.length===1?"y":"ies")+" copied — text it to Ali");
     });
     $("#addCheck").addEventListener("submit",function(e){
       e.preventDefault(); var v=$("#checkText").value.trim(); if(!v) return;
